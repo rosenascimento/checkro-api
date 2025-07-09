@@ -1,18 +1,17 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from celery import Celery
-from dotenv import load_dotenv
-from models import Base, Scan, Issue
-from tasks import scan_site
-import os
 
-load_dotenv()
+from routers import scan_routes  # se você tiver um router para /scan, por exemplo
+from database import setup_database  # se você tiver função de inicialização
 
 app = FastAPI()
 
+# Rota de verificação de integridade para o Azure
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+# Middleware CORS (opcional, mas recomendado)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,37 +20,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-Base.metadata.create_all(bind=engine)
+# Inicializar o banco de dados (opcional)
+setup_database()
 
-@app.get("/health")
-def health_check():
-    return JSONResponse(content={"status": "ok"}, status_code=200)
+# Incluir outras rotas
+app.include_router(scan_routes)
 
-@app.post("/scan/")
-def start_scan(url: str, background_tasks: BackgroundTasks):
-    db = SessionLocal()
-    scan = Scan(url=url, status="pending")
-    db.add(scan)
-    db.commit()
-    db.refresh(scan)
-    db.close()
-    background_tasks.add_task(scan_site, scan.id)
-    return {"message": "Scan iniciado", "scan_id": scan.id}
-
-@app.get("/scan/{scan_id}")
-def get_scan(scan_id: int):
-    db = SessionLocal()
-    scan = db.query(Scan).filter(Scan.id == scan_id).first()
-    if not scan:
-        db.close()
-        return JSONResponse(status_code=404, content={"message": "Scan não encontrado"})
-    issues = db.query(Issue).filter(Issue.scan_id == scan_id).all()
-    db.close()
-    return {
-        "scan": scan.url,
-        "status": scan.status,
-        "issues": [issue.description for issue in issues]
-    }
+# Execução local (ignorado no Azure, mas útil para testes locais)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
