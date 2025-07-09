@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine
-from models import Base
-from tasks import scan_site
-from schemas import ScanRequest
 
-app = FastAPI()
+from banco_de_dados import motor
+from modelos import Base
+from tarefas import local_de_digitalizacao
+from esquemas import SolicitacaoDeDigitalizacao
 
-app.add_middleware(
+aplicativo = FastAPI()
+
+aplicativo.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -15,17 +16,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=motor)
 
-@app.get("/")
-def root():
-    return {"message": "API Checkro online"}
+@aplicativo.get("/")
+def raiz():
+    return {"mensagem": "API Checkro online"}
 
-@app.post("/scan")
-def scan(scan_request: ScanRequest):
-    task = scan_site.delay(scan_request.url)
-    return {"task_id": task.id}
+@aplicativo.post("/scan")
+def escanear(solicitacao: SolicitacaoDeDigitalizacao):
+    tarefa = local_de_digitalizacao.atraso(solicitacao.URL)
+    return {"id_da_tarefa": tarefa.id}
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
+@aplicativo.get("/health")
+def health():
+    return {"message": "Checkro online"}
