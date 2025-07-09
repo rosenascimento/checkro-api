@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import scan_routes
 from database import setup_database
 
 app = FastAPI()
@@ -19,7 +18,6 @@ app.add_middleware(
 )
 
 setup_database()
-app.include_router(scan_routes)
 
 if __name__ == "__main__":
     import uvicorn
