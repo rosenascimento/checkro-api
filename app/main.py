@@ -7,28 +7,25 @@ from schemas import ScanRequest
 
 app = FastAPI()
 
-# CORS (permite chamadas de outros domínios, como do frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Altere para domínios específicos em produção
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Cria as tabelas no banco de dados
 Base.metadata.create_all(bind=engine)
 
 @app.get("/")
-def read_root():
-    return {"message": "Checkro API online"}
+def root():
+    return {"message": "API Checkro online"}
 
 @app.post("/scan")
 def scan(scan_request: ScanRequest):
     task = scan_site.delay(scan_request.url)
     return {"task_id": task.id}
 
-# ✅ Rota de verificação para Azure Health Check
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
