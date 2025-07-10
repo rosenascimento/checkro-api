@@ -1,14 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from app.database import setup_database
-
+import os
 
 app = FastAPI()
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,11 +12,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-setup_database()
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
-    import os
-
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
