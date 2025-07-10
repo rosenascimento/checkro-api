@@ -1,10 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import uuid
+import time
+
+from app.database import SessionLocal
+from app.models import Scan
+from app.scan import scan_site
 
 app = FastAPI()
 
-# Configuração do CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -13,12 +18,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Endpoint de health check
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-# Seu setup_database ou outros endpoints aqui...
+@app.post("/scan")
+async def create_scan(request: Request):
+    body = await request.json()
+    url = body.get("url")
+
+    if not url:
+        return {"error": "URL não fornecida"}
+
+    scan_id = str(uuid.uuid4())
+    db = SessionLocal()
+    scan = Scan(
+        id=scan_id,
+        url=url,
+        status="pending",
+        created_at=int(time.time())
+    )
+    db.add(scan)
+    db.commit()
+    db.close()
+
+    scan_site.delay(scan_id, url)
+
+    return {
+        "scan_id": scan_id,
+        "status": "pending"
+    }
 
 if __name__ == "__main__":
     import uvicorn
