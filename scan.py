@@ -1,47 +1,65 @@
 from celery import Celery
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from dotenv import load_dotenv
+from app.database import SessionLocal
+from app.models import Scan, Issue
 import requests
 from bs4 import BeautifulSoup
 import validators
-import time
-import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# Database setup with PostgreSQL from Render
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+celery_app = Celery(
+    "tasks",
+    broker=os.getenv("REDIS_URL"),
+    backend=os.getenv("REDIS_URL")
+)
 
-# Database models (mantidas da sua API original)
-class Scan(Base):
-    __tablename__ = "scans"
-    id = Column(String, primary_key=True)
-    url = Column(String)
-    status = Column(String)
-    created_at = Column(Integer)
+def crawl_site(url):
+    pages = [url]
+    try:
+        resp = requests.get(url, timeout=5)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for link in soup.find_all("a"):
+            href = link.get("href")
+            if href and validators.url(urljoin(url, href)):
+                pages.append(urljoin(url, href))
+    except Exception:
+        pass
+    return list(set(pages))
 
-class Issue(Base):
-    __tablename__ = "issues"
-    id = Column(Integer, primary_key=True)
-    scan_id = Column(String, ForeignKey("scans.id"))
-    page_url = Column(String)
-    rule_code = Column(String)
-    description = Column(Text)
-    term_detected = Column(Text, nullable=True)
-    suggestion = Column(Text)
+@celery_app.task
+def scan_site(scan_id: str, url: str):
+    db = SessionLocal()
+    try:
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if scan and scan.status == "pending":
+            pages = crawl_site(url)
+            for page in pages:
+                for rule_code, rule in PROHIBITED_RULES.items():
+                    for term in rule["terms"]:
+                        try:
+                            html = requests.get(page, timeout=5).text
+                            if term.lower() in html.lower():
+                                issue = Issue(
+                                    scan_id=scan_id,
+                                    page_url=page,
+                                    rule_code=rule_code,
+                                    description=rule["desc"],
+                                    term_detected=term,
+                                    suggestion="Remover ou revisar o conteúdo"
+                                )
+                                db.add(issue)
+                        except:
+                            continue
+            scan.status = "completed"
+            db.commit()
+    finally:
+        db.close()
 
-Base.metadata.create_all(bind=engine)
+# ----- Regras -----
 
-# Rule definitions (mantidas da sua API original, com ajuste em Pδ-34)
 PROHIBITED_RULES = {
     "P-01": {"desc": "Conteúdo adulto ou pornográfico", "terms": ["adulto", "pornô", "xxx"]},
     "P-02": {"desc": "Conteúdo violento ou chocante", "terms": ["violência", "sangue", "gore"]},
@@ -92,52 +110,3 @@ ALLOWED_RULES = {
     "A-09": {"desc": "Design responsivo e boa experiência móvel", "terms": []},
     "A-10": {"desc": "Conteúdo atualizado regularmente", "terms": []},
 }
-
-# Configuração do Celery
-celery_app = Celery(
-    "tasks",
-    broker=os.getenv("REDIS_URL"),
-    backend=os.getenv("REDIS_URL")
-)
-
-# Dependency for database session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-@celery_app.task
-def scan_site(scan_id: str, url: str):
-    db = SessionLocal()
-    try:
-        scan = db.query(Scan).filter(Scan.id == scan_id).first()
-        if scan and scan.status == "pending":
-            pages = crawl_site(url)
-            issues = []
-            for page in pages:
-                page_issues = analyze_page(page)
-                for issue in page_issues:
-                    db_issue = Issue(
-                        scan_id=scan_id,
-                        page_url=page,
-                        rule_code=issue["rule_code"],
-                        description=issue["desc"],
-                        term_detected=issue["term"],
-                        suggestion=issue["suggestion"]
-                    )
-                    db.add(db_issue)
-                    issues.append(IssueResponse(
-                        id=db_issue.id,
-                        page_url=page,
-                        rule_code=issue["rule_code"],
-                        description=issue["desc"],
-                        term_detected=issue["term"],
-                        suggestion=issue["suggestion"]
-                    ))
-            db.commit()
-            scan.status = "completed"
-            db.commit()
-    finally:
-        db.close()
