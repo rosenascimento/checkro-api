@@ -4,6 +4,7 @@ import os
 
 app = FastAPI()
 
+# Configuração do CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -12,10 +13,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Endpoint de health check
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+# Seu setup_database ou outros endpoints aqui...
 
 if __name__ == "__main__":
     import uvicorn
