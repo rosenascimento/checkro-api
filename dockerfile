@@ -1,4 +1,4 @@
-FROM python:3.11
+FROM python:3.9-slim
 
 WORKDIR /app
 
@@ -7,6 +7,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+ENV REDIS_URL=${REDIS_URL}
+ENV DATABASE_URL=${DATABASE_URL}
+ENV PORT=5000
 
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
