@@ -1,9 +1,11 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI
+from dotenv import load_dotenv
+import os
 
-app = Flask(__name__)
-CORS(app)
+load_dotenv()
 
-@app.route('/health')
-def health_check():
-    return jsonify({"status": "healthy", "message": "Checkro API rodando!"}), 200
+app = FastAPI()
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
