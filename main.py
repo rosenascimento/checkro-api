@@ -1,26 +1,31 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, jsonify
 import os
+from dotenv import load_dotenv
+from celery import Celery
+from database import engine, Base, SessionLocal
+from scan import scan_site
 
-app = FastAPI()
+# Carregar variáveis de ambiente
+load_dotenv()
 
-# Configuração do CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Configuração do Flask
+app = Flask(__name__)
+
+# Configuração do Celery
+celery_app = Celery(
+    "tasks",
+    broker=os.getenv("REDIS_URL"),
+    backend=os.getenv("REDIS_URL")
 )
 
-# Endpoint de health check
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+# Criar tabelas do banco de dados
+Base.metadata.create_all(bind=engine)
 
-# Seu setup_database ou outros endpoints aqui...
+# Endpoint de saúde
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "healthy", "message": "API Checkro rodando no Azure!"}), 200
 
+# Função para iniciar a API
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
