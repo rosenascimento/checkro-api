@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 from celery import Celery
@@ -10,6 +11,7 @@ load_dotenv()
 
 # Configuração do Flask
 app = Flask(__name__)
+CORS(app, resources={r"/health": {"origins": "https://checkro.com"}})  # Permitir CORS para checkro.com
 
 # Configuração do Celery
 celery_app = Celery(
