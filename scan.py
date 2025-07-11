@@ -1,47 +1,12 @@
-from celery import Celery
-import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
 import validators
 import time
 import re
 from urllib.parse import urljoin, urlparse
+from database import SessionLocal, Scan, Issue
 
-load_dotenv()
-
-# Database setup with PostgreSQL from Render
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Database models (mantidas da sua API original)
-class Scan(Base):
-    __tablename__ = "scans"
-    id = Column(String, primary_key=True)
-    url = Column(String)
-    status = Column(String)
-    created_at = Column(Integer)
-
-class Issue(Base):
-    __tablename__ = "issues"
-    id = Column(Integer, primary_key=True)
-    scan_id = Column(String, ForeignKey("scans.id"))
-    page_url = Column(String)
-    rule_code = Column(String)
-    description = Column(Text)
-    term_detected = Column(Text, nullable=True)
-    suggestion = Column(Text)
-
-Base.metadata.create_all(bind=engine)
-
-# Rule definitions (mantidas da sua API original, com ajuste em Pδ-34)
+# Definições de regras (completas conforme seu código original)
 PROHIBITED_RULES = {
     "P-01": {"desc": "Conteúdo adulto ou pornográfico", "terms": ["adulto", "pornô", "xxx"]},
     "P-02": {"desc": "Conteúdo violento ou chocante", "terms": ["violência", "sangue", "gore"]},
@@ -93,51 +58,67 @@ ALLOWED_RULES = {
     "A-10": {"desc": "Conteúdo atualizado regularmente", "terms": []},
 }
 
-# Configuração do Celery
-celery_app = Celery(
-    "tasks",
-    broker=os.getenv("REDIS_URL"),
-    backend=os.getenv("REDIS_URL")
-)
+# Classe para IssueResponse
+class IssueResponse:
+    def __init__(self, id, page_url, rule_code, description, term_detected, suggestion):
+        self.id = id
+        self.page_url = page_url
+        self.rule_code = rule_code
+        self.description = description
+        self.term_detected = term_detected
+        self.suggestion = suggestion
 
-# Dependency for database session
-def get_db():
-    db = SessionLocal()
+def crawl_site(url):
+    """Crawla o site e retorna uma lista de URLs acessíveis."""
+    if not validators.url(url):
+        return []
+    pages = []
     try:
-        yield db
-    finally:
-        db.close()
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        for link in soup.find_all('a', href=True):
+            absolute_url = urljoin(url, link['href'])
+            if validators.url(absolute_url) and urlparse(absolute_url).netloc == urlparse(url).netloc:
+                pages.append(absolute_url)
+        return list(set(pages))  # Remove duplicatas
+    except Exception as e:
+        print(f"Erro ao crawlar {url}: {e}")
+        return [url]
 
-@celery_app.task
-def scan_site(scan_id: str, url: str):
-    db = SessionLocal()
+def analyze_page(page_url):
+    """Analisa o conteúdo da página e retorna uma lista de problemas encontrados."""
+    issues = []
     try:
-        scan = db.query(Scan).filter(Scan.id == scan_id).first()
-        if scan and scan.status == "pending":
-            pages = crawl_site(url)
-            issues = []
-            for page in pages:
-                page_issues = analyze_page(page)
-                for issue in page_issues:
-                    db_issue = Issue(
-                        scan_id=scan_id,
-                        page_url=page,
-                        rule_code=issue["rule_code"],
-                        description=issue["desc"],
-                        term_detected=issue["term"],
-                        suggestion=issue["suggestion"]
-                    )
-                    db.add(db_issue)
-                    issues.append(IssueResponse(
-                        id=db_issue.id,
-                        page_url=page,
-                        rule_code=issue["rule_code"],
-                        description=issue["desc"],
-                        term_detected=issue["term"],
-                        suggestion=issue["suggestion"]
-                    ))
-            db.commit()
-            scan.status = "completed"
-            db.commit()
-    finally:
-        db.close()
+        response = requests.get(page_url, timeout=10)
+        response.raise_for_status()
+        content = response.text.lower()
+        soup = BeautifulSoup(content, 'html.parser')
+
+        # Verificar regras proibidas
+        for rule_code, rule in PROHIBITED_RULES.items():
+            for term in rule["terms"]:
+                if term in content:
+                    issues.append({
+                        "rule_code": rule_code,
+                        "desc": rule["desc"],
+                        "term": term,
+                        "suggestion": "Remova ou revise o conteúdo relacionado a este termo."
+                    })
+
+        # Verificar regras permitidas (opcional, para validação positiva)
+        for rule_code, rule in ALLOWED_RULES.items():
+            if any(term in content for term in rule["terms"]):
+                issues.append({
+                    "rule_code": rule_code,
+                    "desc": rule["desc"],
+                    "term": next((term for term in rule["terms"] if term in content), None),
+                    "suggestion": "Manter e aprimorar este conteúdo."
+                })
+
+        return issues
+    except Exception as e:
+        print(f"Erro ao analisar {page_url}: {e}")
+        return []
+
+# Manter a task scan_site conforme o código original (já incluso no celery_worker.py)
