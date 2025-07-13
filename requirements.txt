@@ -7,3 +7,4 @@ httpx
 celery
 redis
 beautifulsoup4
+validators
